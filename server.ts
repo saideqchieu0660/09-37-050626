@@ -76,6 +76,27 @@ const geminiKeyStates: KeyState[] = GEMINI_KEYS.map((key, i) => ({
 
 let currentKeyIndex = 0;
 
+interface RotationLog {
+  id: string;
+  timestamp: string;
+  fromKeyIndex?: number;
+  toKeyIndex: number;
+  reason: string;
+}
+
+const rotationLogs: RotationLog[] = [];
+
+function addRotationLog(log: Omit<RotationLog, "timestamp" | "id">) {
+  rotationLogs.unshift({ 
+    ...log, 
+    id: Math.random().toString(36).substring(7),
+    timestamp: new Date().toISOString() 
+  });
+  if (rotationLogs.length > 20) {
+    rotationLogs.pop();
+  }
+}
+
 function getGeminiClient(): { ai: any, state: KeyState } {
   if (geminiKeyStates.length === 0) {
     throw new Error("No Gemini API keys configured.");
@@ -86,12 +107,18 @@ function getGeminiClient(): { ai: any, state: KeyState } {
   geminiKeyStates.forEach(s => {
     if (s.status === "rate_limited" && s.lastUsed && (now - s.lastUsed.getTime() > 60000)) {
        s.status = "active";
+       addRotationLog({
+         toKeyIndex: s.index,
+         reason: "Key auto-recovered from rate limit cooldown (60s)"
+       });
     }
   });
 
   // 2. Find the next active key
   let attempts = 0;
   let selectedState: KeyState | null = null;
+  let originalIndex = currentKeyIndex;
+  let skippedIndices: number[] = [];
   
   while (attempts < geminiKeyStates.length) {
     const s = geminiKeyStates[currentKeyIndex];
@@ -99,6 +126,7 @@ function getGeminiClient(): { ai: any, state: KeyState } {
        selectedState = s;
        break;
     }
+    skippedIndices.push(currentKeyIndex);
     currentKeyIndex = (currentKeyIndex + 1) % geminiKeyStates.length;
     attempts++;
   }
@@ -106,6 +134,25 @@ function getGeminiClient(): { ai: any, state: KeyState } {
   // 3. Fallback: If all keys are rate limited, pick the one with the lowest usage or the one we are at
   if (!selectedState) {
     selectedState = geminiKeyStates[currentKeyIndex];
+    addRotationLog({
+       fromKeyIndex: originalIndex,
+       toKeyIndex: selectedState.index,
+       reason: "All keys rate limited. Forced fallback to current index."
+    });
+  } else if (skippedIndices.length > 0) {
+    addRotationLog({
+       fromKeyIndex: originalIndex,
+       toKeyIndex: selectedState.index,
+       reason: `Skipped rate-limited keys: [${skippedIndices.join(', ')}]`
+    });
+  } else {
+    // Too noisy to log every single round-robin rotation, 
+    // but if requested, we can log standard rotation:
+    addRotationLog({
+       fromKeyIndex: originalIndex,
+       toKeyIndex: selectedState.index,
+       reason: "Standard round-robin rotation"
+    });
   }
   
   selectedState.usageCount++;
@@ -122,8 +169,16 @@ function handleGeminiError(state: KeyState, err: any) {
   const msg = err?.message || err?.toString() || "";
   if (err?.status === 429 || msg.includes("429") || msg.includes("quota") || msg.toLowerCase().includes("too many requests")) {
     state.status = "rate_limited";
+    addRotationLog({
+      toKeyIndex: state.index,
+      reason: `Rate Limited / Quota Exceeded. Error: ${msg.substring(0, 100)}`
+    });
   } else {
     state.status = "failed";
+    addRotationLog({
+      toKeyIndex: state.index,
+      reason: `API Error. Msg: ${msg.substring(0, 100)}`
+    });
   }
 }
 
@@ -557,6 +612,7 @@ KHÔNG sử dụng Markdown code block. TRẢ VỀ ĐÚNG MỘT OBJECT JSON DUY 
     res.json({
        totalKeys: geminiKeyStates.length,
        currentIndex: currentKeyIndex,
+       logs: rotationLogs,
        keys: geminiKeyStates.map(s => ({
           index: s.index,
           maskedKey: s.maskedKey,

@@ -1,5 +1,5 @@
 import React, { useState, useRef } from "react";
-import { Copy, ExternalLink, Database, Check, Sparkles, X, Edit3, Trash2, ChevronRight } from "lucide-react";
+import { Copy, ExternalLink, Database, Check, Sparkles, X, Edit3, Trash2, ChevronRight, ChevronDown, Plus } from "lucide-react";
 import { cn } from "../lib/utils.js";
 import { db, auth } from "../lib/firebase.js";
 import { collection, writeBatch, doc, setDoc } from "firebase/firestore";
@@ -16,6 +16,33 @@ export default function ManualFlashcardImporter() {
   const [previewCards, setPreviewCards] = useState<{id: string, front: string, back: string}[] | null>(null);
   const [deckTitle, setDeckTitle] = useState("");
   const [deckSubject, setDeckSubject] = useState("");
+  
+  const [isCatDropdownOpen, setIsCatDropdownOpen] = useState(false);
+  const catDropdownRef = useRef<HTMLDivElement>(null);
+  const catInputRef = useRef<HTMLInputElement>(null);
+
+  const existingCategories = React.useMemo(() => {
+    const allDecks = store.getDecks();
+    const cats = allDecks.filter(d => d.subject).map(d => d.subject as string);
+    return Array.from(new Set(cats));
+  }, []);
+
+  const filteredCategories = existingCategories.filter(c => 
+    c.toLowerCase().includes(deckSubject.toLowerCase())
+  );
+  const exactMatchExists = existingCategories.some(
+    c => c.toLowerCase() === deckSubject.toLowerCase()
+  );
+
+  React.useEffect(() => {
+    function handleClickOutside(event: MouseEvent) {
+      if (catDropdownRef.current && !catDropdownRef.current.contains(event.target as Node)) {
+        setIsCatDropdownOpen(false);
+      }
+    }
+    document.addEventListener("mousedown", handleClickOutside);
+    return () => document.removeEventListener("mousedown", handleClickOutside);
+  }, []);
   
   const [isProcessing, setIsProcessing] = useState(false);
   const [progress, setProgress] = useState<number | null>(null);
@@ -287,15 +314,72 @@ Acknowledge this protocol. Execute all text transformations deterministically at
                 className="w-full bg-white dark:bg-zinc-950 border border-stone-200/50 dark:border-zinc-800/80 rounded-xl px-4 py-3 text-stone-900 dark:text-stone-100 text-sm focus:outline-none focus:ring-1 focus:ring-blue-500"
               />
             </div>
-            <div>
+            <div ref={catDropdownRef} className="relative">
               <label className="text-sm font-semibold opacity-80 mb-2 block">Phân loại / Môn học:</label>
-              <input 
-                type="text" 
-                value={deckSubject}
-                onChange={(e) => setDeckSubject(e.target.value)}
-                placeholder="VD: Vocabulary"
-                className="w-full bg-white dark:bg-zinc-950 border border-stone-200/50 dark:border-zinc-800/80 rounded-xl px-4 py-3 text-stone-900 dark:text-stone-100 text-sm focus:outline-none focus:ring-1 focus:ring-blue-500"
-              />
+              <div className="relative">
+                 <input 
+                    ref={catInputRef}
+                    type="text" 
+                    value={deckSubject}
+                    onChange={(e) => {
+                      setDeckSubject(e.target.value);
+                      setIsCatDropdownOpen(true);
+                    }}
+                    onFocus={() => setIsCatDropdownOpen(true)}
+                    placeholder="VD: Vocabulary"
+                    autoComplete="off"
+                    className="w-full bg-white dark:bg-zinc-950 border border-stone-200/50 dark:border-zinc-800/80 rounded-xl px-4 py-3 text-stone-900 dark:text-stone-100 text-sm focus:outline-none focus:ring-1 focus:ring-blue-500 pr-10"
+                 />
+                 <div className="absolute right-3 top-1/2 -translate-y-1/2 cursor-pointer opacity-50 hover:opacity-100 transition-opacity" onClick={() => setIsCatDropdownOpen(!isCatDropdownOpen)}>
+                   <ChevronDown className={cn("w-4 h-4 transition-transform", isCatDropdownOpen && "rotate-180")} />
+                 </div>
+              </div>
+
+               {isCatDropdownOpen && (
+                 <div className="absolute top-full left-0 right-0 mt-2 bg-white dark:bg-zinc-900 border border-stone-200 dark:border-zinc-800 rounded-xl shadow-[0_10px_40px_-10px_rgba(0,0,0,0.15)] dark:shadow-[0_10px_40px_-10px_rgba(0,0,0,0.5)] overflow-hidden z-[200] animate-in fade-in zoom-in-95 duration-200 block">
+                   <div className="w-full flex flex-col">
+                     <div 
+                       className="max-h-[220px] overflow-y-auto w-full p-1.5 space-y-0.5"
+                       style={{ WebkitOverflowScrolling: "touch" }}
+                     >
+                       {filteredCategories.map((cat, idx) => (
+                         <button
+                           key={idx}
+                           type="button"
+                           onClick={(e) => {
+                             e.preventDefault();
+                             e.stopPropagation();
+                             setDeckSubject(cat);
+                             setIsCatDropdownOpen(false);
+                           }}
+                           className="w-full text-left px-3 py-2 text-sm rounded-lg hover:bg-stone-100 dark:hover:bg-zinc-800 transition font-medium text-stone-700 dark:text-stone-300 hover:text-stone-900 dark:hover:text-stone-100"
+                         >
+                           {cat}
+                         </button>
+                       ))}
+                       
+                       {(!exactMatchExists && deckSubject.trim() !== '') && (
+                         <button
+                           type="button"
+                           onClick={(e) => {
+                             e.preventDefault();
+                             e.stopPropagation();
+                             catInputRef.current?.focus();
+                             setIsCatDropdownOpen(false);
+                           }}
+                           className="w-full text-left px-3 py-2.5 text-sm rounded-lg bg-blue-50/50 hover:bg-blue-100/50 dark:bg-blue-900/10 dark:hover:bg-blue-900/30 text-blue-600 dark:text-blue-400 font-semibold transition flex items-center gap-2 mt-1 border border-transparent hover:border-blue-200 dark:hover:border-blue-800"
+                         >
+                           <Plus className="w-4 h-4 shrink-0" /> Tạo "{deckSubject}"
+                         </button>
+                       )}
+
+                       {(filteredCategories.length === 0 && deckSubject.trim() === '') && (
+                          <div className="px-3 py-4 text-xs text-center opacity-50 font-medium">Bạn chưa có danh mục nào</div>
+                       )}
+                     </div>
+                   </div>
+                 </div>
+               )}
             </div>
           </div>
 

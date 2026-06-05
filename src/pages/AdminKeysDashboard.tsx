@@ -61,12 +61,22 @@ function D3Sparkline({ data, color }: { data: number[], color: string }) {
   );
 }
 
+interface RotationLog {
+  id: string;
+  timestamp: string;
+  fromKeyIndex?: number;
+  toKeyIndex: number;
+  reason: string;
+}
+
 function ServiceMonitor({ adminKey }: { adminKey: string }) {
   const [keys, setKeys] = useState<KeyState[]>([]);
   const [totalKeys, setTotalKeys] = useState(0);
   const [currentIndex, setCurrentIndex] = useState(0);
   const [error, setError] = useState("");
   const [isPolling, setIsPolling] = useState(true);
+  const [logs, setLogs] = useState<RotationLog[]>([]);
+  const [activeTab, setActiveTab] = useState<'monitor' | 'logs'>('monitor');
   
   const [usageHistory, setUsageHistory] = useState<Record<number, number[]>>({});
   const prevKeysRef = useRef<KeyState[]>([]);
@@ -107,6 +117,7 @@ function ServiceMonitor({ adminKey }: { adminKey: string }) {
       setKeys(data.keys);
       setTotalKeys(data.totalKeys);
       setCurrentIndex(data.currentIndex);
+      setLogs(data.logs || []);
       setError("");
     } catch (err: any) {
       setError(err.message);
@@ -126,7 +137,7 @@ function ServiceMonitor({ adminKey }: { adminKey: string }) {
 
   return (
     <div className="space-y-6">
-      <div className="flex items-center justify-between bg-stone-50 dark:bg-zinc-900 p-4 rounded-xl border border-stone-200 dark:border-zinc-800">
+      <div className="flex items-center justify-between bg-stone-50 dark:bg-zinc-900 p-4 rounded-xl border border-stone-200 dark:border-zinc-800 flex-wrap gap-4">
         <div>
           <h2 className="text-xl font-bold flex items-center gap-2">
             <RefreshCw className={`w-5 h-5 text-blue-500 ${isPolling ? 'animate-spin' : ''}`} />
@@ -137,6 +148,20 @@ function ServiceMonitor({ adminKey }: { adminKey: string }) {
           </p>
         </div>
         <div className="flex items-center gap-4">
+          <div className="flex bg-stone-200/50 dark:bg-zinc-800/50 p-1 rounded-lg">
+            <button
+              onClick={() => setActiveTab('monitor')}
+              className={`px-4 py-1.5 rounded-md text-sm font-medium transition-colors ${activeTab === 'monitor' ? 'bg-white dark:bg-zinc-700 shadow-sm text-stone-900 dark:text-stone-100' : 'text-stone-500 dark:text-stone-400 hover:text-stone-700 dark:hover:text-stone-200'}`}
+            >
+              Monitor
+            </button>
+            <button
+              onClick={() => setActiveTab('logs')}
+              className={`px-4 py-1.5 rounded-md text-sm font-medium transition-colors ${activeTab === 'logs' ? 'bg-white dark:bg-zinc-700 shadow-sm text-stone-900 dark:text-stone-100' : 'text-stone-500 dark:text-stone-400 hover:text-stone-700 dark:hover:text-stone-200'}`}
+            >
+              Rotation Logs
+            </button>
+          </div>
           {error && <span className="text-red-500 text-sm">{error}</span>}
           <button 
             onClick={() => setIsPolling(!isPolling)}
@@ -153,70 +178,109 @@ function ServiceMonitor({ adminKey }: { adminKey: string }) {
         </div>
       </div>
 
-      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4">
-        {keys.map((k) => (
-          <div 
-            key={k.index} 
-            className={`card-3d p-5 rounded-xl border flex flex-col gap-4 ${
-              k.index === currentIndex ? 'ring-2 ring-blue-500 border-blue-500' : ''
-            }`}
-          >
-            <div className="flex justify-between items-start">
-              <span className="text-sm font-bold bg-stone-200 dark:bg-zinc-800 px-2.5 py-1 rounded-md">
-                Key #{k.index}
-              </span>
-              <div className="flex items-center gap-3">
-                 <D3Sparkline 
-                    data={usageHistory[k.index] || Array(20).fill(0)} 
-                    color={k.status === 'rate_limited' ? '#f59e0b' : k.status === 'failed' ? '#ef4444' : '#3b82f6'} 
-                 />
-                 {k.status === "active" && <span className="flex items-center gap-1 text-xs font-bold text-green-500 bg-green-100 dark:bg-green-900/30 px-2 py-1 rounded-full"><CheckCircle className="w-3.5 h-3.5" /> ACTIVE</span>}
-                 {k.status === "rate_limited" && <span className="flex items-center gap-1 text-xs font-bold text-amber-500 bg-amber-100 dark:bg-amber-900/30 px-2 py-1 rounded-full"><Clock className="w-3.5 h-3.5" /> RATE LIMITED</span>}
-                 {k.status === "failed" && <span className="flex items-center gap-1 text-xs font-bold text-red-500 bg-red-100 dark:bg-red-900/30 px-2 py-1 rounded-full"><AlertCircle className="w-3.5 h-3.5" /> FAILED</span>}
+      {activeTab === 'monitor' ? (
+        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4">
+          {keys.map((k) => (
+            <div 
+              key={k.index} 
+              className={`card-3d p-5 rounded-xl border flex flex-col gap-4 ${
+                k.index === currentIndex ? 'ring-2 ring-blue-500 border-blue-500' : ''
+              }`}
+            >
+              <div className="flex justify-between items-start">
+                <span className="text-sm font-bold bg-stone-200 dark:bg-zinc-800 px-2.5 py-1 rounded-md">
+                  Key #{k.index}
+                </span>
+                <div className="flex items-center gap-3">
+                   <D3Sparkline 
+                      data={usageHistory[k.index] || Array(20).fill(0)} 
+                      color={k.status === 'rate_limited' ? '#f59e0b' : k.status === 'failed' ? '#ef4444' : '#3b82f6'} 
+                   />
+                   {k.status === "active" && <span className="flex items-center gap-1 text-xs font-bold text-green-500 bg-green-100 dark:bg-green-900/30 px-2 py-1 rounded-full"><CheckCircle className="w-3.5 h-3.5" /> ACTIVE</span>}
+                   {k.status === "rate_limited" && <span className="flex items-center gap-1 text-xs font-bold text-amber-500 bg-amber-100 dark:bg-amber-900/30 px-2 py-1 rounded-full"><Clock className="w-3.5 h-3.5" /> RATE LIMITED</span>}
+                   {k.status === "failed" && <span className="flex items-center gap-1 text-xs font-bold text-red-500 bg-red-100 dark:bg-red-900/30 px-2 py-1 rounded-full"><AlertCircle className="w-3.5 h-3.5" /> FAILED</span>}
+                </div>
               </div>
-            </div>
-            
-            <div>
-              <div className="text-xs text-stone-500 dark:text-stone-400 mb-1 uppercase tracking-wider">Masked Key</div>
-              <div className="font-mono text-sm">{k.maskedKey}</div>
-            </div>
-
-            <div className="grid grid-cols-2 gap-2 text-sm mt-auto border-t border-stone-200 dark:border-zinc-800 pt-3">
+              
               <div>
-                <div className="text-stone-500 text-xs">Usage Count</div>
-                <div className="font-medium text-lg">{k.usageCount}</div>
+                <div className="text-xs text-stone-500 dark:text-stone-400 mb-1 uppercase tracking-wider">Masked Key</div>
+                <div className="font-mono text-sm">{k.maskedKey}</div>
               </div>
-              <div>
-                <div className="text-stone-500 text-xs">Error Count</div>
-                <div className="font-medium text-red-500 text-lg">{k.errorCount}</div>
-              </div>
-            </div>
-            
-            <div className="mt-1">
-               <div className="flex justify-between text-xs mb-1.5">
-                 <span className="text-stone-500 dark:text-stone-400">Est. Daily Quota</span>
-                 <span className="font-medium">{Math.min(Math.round((k.usageCount / 1500) * 100), 100)}%</span>
-               </div>
-               <div className="w-full bg-stone-200 dark:bg-zinc-800 rounded-full h-1.5 overflow-hidden">
-                 <div 
-                   className={`h-full rounded-full transition-all duration-500 ${
-                     k.status === 'rate_limited' || (k.usageCount / 1500) >= 0.9 
-                       ? 'bg-amber-500' 
-                       : k.status === 'failed' 
-                         ? 'bg-red-500' 
-                         : 'bg-blue-500'
-                   }`} 
-                   style={{ width: `${Math.min((k.usageCount / 1500) * 100, 100)}%` }}
-                 ></div>
-               </div>
-            </div>
 
-            <div className="text-xs text-stone-400 dark:text-stone-500 mt-1">
-              Last Used: {k.lastUsed ? new Date(k.lastUsed).toLocaleTimeString() : 'Never'}
+              <div className="grid grid-cols-2 gap-2 text-sm mt-auto border-t border-stone-200 dark:border-zinc-800 pt-3">
+                <div>
+                  <div className="text-stone-500 text-xs">Usage Count</div>
+                  <div className="font-medium text-lg">{k.usageCount}</div>
+                </div>
+                <div>
+                  <div className="text-stone-500 text-xs">Error Count</div>
+                  <div className="font-medium text-red-500 text-lg">{k.errorCount}</div>
+                </div>
+              </div>
+              
+              <div className="mt-1">
+                 <div className="flex justify-between text-xs mb-1.5">
+                   <span className="text-stone-500 dark:text-stone-400">Est. Daily Quota</span>
+                   <span className="font-medium">{Math.min(Math.round((k.usageCount / 1500) * 100), 100)}%</span>
+                 </div>
+                 <div className="w-full bg-stone-200 dark:bg-zinc-800 rounded-full h-1.5 overflow-hidden">
+                   <div 
+                     className={`h-full rounded-full transition-all duration-500 ${
+                       k.status === 'rate_limited' || (k.usageCount / 1500) >= 0.9 
+                         ? 'bg-amber-500' 
+                         : k.status === 'failed' 
+                           ? 'bg-red-500' 
+                           : 'bg-blue-500'
+                     }`} 
+                     style={{ width: `${Math.min((k.usageCount / 1500) * 100, 100)}%` }}
+                   ></div>
+                 </div>
+              </div>
+
+              <div className="text-xs text-stone-400 dark:text-stone-500 mt-1">
+                Last Used: {k.lastUsed ? new Date(k.lastUsed).toLocaleTimeString() : 'Never'}
+              </div>
             </div>
+          ))}
+        </div>
+      ) : (
+        <div className="card-3d rounded-xl border border-stone-200 dark:border-zinc-800 overflow-hidden">
+          <div className="p-4 bg-stone-50 border-b border-stone-200 dark:bg-zinc-900/50 dark:border-zinc-800 font-bold">
+            Recent API Rotation Events
           </div>
-        ))}
-      </div>
+          {logs.length === 0 ? (
+            <div className="p-8 text-center text-stone-500 dark:text-stone-400">
+              No rotation events logged yet.
+            </div>
+          ) : (
+            <div className="divide-y divide-stone-200 dark:divide-zinc-800">
+              {logs.map((log) => (
+                <div key={log.id} className="p-4 flex flex-col md:flex-row md:items-center gap-4 hover:bg-stone-50 dark:hover:bg-zinc-900/30 transition-colors">
+                  <div className="text-sm font-mono text-stone-500 shrink-0 w-32">
+                    {new Date(log.timestamp).toLocaleTimeString()}
+                  </div>
+                  <div className="flex items-center gap-3 shrink-0">
+                     {log.fromKeyIndex !== undefined && (
+                        <>
+                          <span className="font-mono bg-stone-100 dark:bg-zinc-800 px-2 py-0.5 rounded text-xs">
+                            Key #{log.fromKeyIndex}
+                          </span>
+                          <span className="text-stone-400">→</span>
+                        </>
+                     )}
+                    <span className="font-mono bg-blue-100 text-blue-700 dark:bg-blue-900/30 dark:text-blue-400 px-2 py-0.5 rounded text-xs font-bold">
+                      Key #{log.toKeyIndex}
+                    </span>
+                  </div>
+                  <div className="text-sm">
+                    {log.reason}
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+      )}
     </div>
   );
 }
