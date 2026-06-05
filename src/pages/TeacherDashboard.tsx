@@ -239,7 +239,7 @@ export default function TeacherDashboard() {
              <p className="text-sm font-bold opacity-60 uppercase mb-1">Active Students</p>
              <p className="text-4xl font-display font-bold text-transparent bg-clip-text bg-gradient-to-r from-amber-700 via-amber-500 to-yellow-600 dark:from-amber-200 dark:via-yellow-400 dark:to-amber-500">{users.length}</p>
            </div>
-           {user?.role === "admin" && (
+           {(user?.role === "teacher" || user?.role === "admin") && (
              <div className="hidden md:block">
                <p className="text-sm font-bold opacity-60 uppercase mb-1">System Health</p>
                <Link to="/admin/keys" className="inline-flex items-center gap-2 bg-stone-100 hover:bg-stone-200 text-stone-900 border border-stone-300 dark:bg-zinc-800 dark:hover:bg-zinc-700 dark:text-stone-100 dark:border-zinc-700 px-4 py-2 rounded-xl transition text-sm font-bold">
@@ -252,7 +252,7 @@ export default function TeacherDashboard() {
         <BarChart3 className="absolute right-0 bottom-0 translate-x-1/4 translate-y-1/4 w-64 h-64 opacity-10" />
       </div>
 
-      {user?.role === "admin" && (
+      {(user?.role === "teacher" || user?.role === "admin") && (
         <div className="md:hidden flex justify-end">
           <Link to="/admin/keys" className="inline-flex items-center gap-2 bg-stone-100/50 hover:bg-stone-200/50 text-stone-900 dark:bg-zinc-800/50 dark:hover:bg-zinc-700/50 dark:text-stone-100 px-4 py-3 rounded-xl transition text-sm font-bold w-full justify-center border border-stone-200 dark:border-zinc-800">
             <Settings className="w-4 h-4" />

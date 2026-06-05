@@ -135,46 +135,81 @@ function ServiceMonitor({ adminKey }: { adminKey: string }) {
     return () => clearInterval(interval);
   }, [adminKey, isPolling]);
 
+  const activeCount = keys.filter(k => k.status === 'active').length;
+  const limitedCount = keys.filter(k => k.status === 'rate_limited').length;
+  const failedCount = keys.filter(k => k.status === 'failed').length;
+  const statusScore = keys.length === 0 ? 100 : ((activeCount * 1 + limitedCount * 0.5 + failedCount * 0) / keys.length) * 100;
+  const healthScore = Math.round(statusScore);
+
   return (
     <div className="space-y-6">
-      <div className="flex items-center justify-between bg-stone-50 dark:bg-zinc-900 p-4 rounded-xl border border-stone-200 dark:border-zinc-800 flex-wrap gap-4">
-        <div>
-          <h2 className="text-xl font-bold flex items-center gap-2">
-            <RefreshCw className={`w-5 h-5 text-blue-500 ${isPolling ? 'animate-spin' : ''}`} />
-            Real-time Health Monitor
-          </h2>
-          <p className="text-stone-500 dark:text-stone-400 text-sm mt-1">
-            Monitoring {totalKeys} API keys. Round-Robin Queue is currently pointing to index: <span className="font-mono bg-stone-200 dark:bg-zinc-800 px-2 py-0.5 rounded">{currentIndex}</span>
-          </p>
+      <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+        <div className="card-3d p-6 rounded-xl border border-stone-200 dark:border-zinc-800 flex flex-col items-center justify-center text-center">
+          <div className="text-sm font-bold opacity-60 uppercase mb-2">System Health Score</div>
+          <div className="text-5xl font-display font-bold mb-2">
+            <span className={healthScore >= 80 ? 'text-green-500' : healthScore >= 50 ? 'text-amber-500' : 'text-red-500'}>
+               {healthScore}%
+            </span>
+          </div>
+          <div className="w-full bg-stone-200 dark:bg-zinc-800 rounded-full h-2 mt-4 overflow-hidden flex">
+            {keys.length > 0 && (
+              <>
+                <div className="h-full bg-green-500 transition-all duration-500" style={{ width: `${(activeCount / keys.length) * 100}%` }}></div>
+                <div className="h-full bg-amber-500 transition-all duration-500" style={{ width: `${(limitedCount / keys.length) * 100}%` }}></div>
+                <div className="h-full bg-red-500 transition-all duration-500" style={{ width: `${(failedCount / keys.length) * 100}%` }}></div>
+              </>
+            )}
+          </div>
+          <div className="flex gap-4 justify-center mt-3 text-xs w-full text-stone-500 dark:text-stone-400">
+             <div className="flex items-center gap-1"><div className="w-2 h-2 rounded-full bg-green-500"></div> {activeCount} Active</div>
+             <div className="flex items-center gap-1"><div className="w-2 h-2 rounded-full bg-amber-500"></div> {limitedCount} Lim</div>
+             <div className="flex items-center gap-1"><div className="w-2 h-2 rounded-full bg-red-500"></div> {failedCount} Fail</div>
+          </div>
         </div>
-        <div className="flex items-center gap-4">
-          <div className="flex bg-stone-200/50 dark:bg-zinc-800/50 p-1 rounded-lg">
+
+        <div className="lg:col-span-2 flex flex-col justify-center bg-stone-50 dark:bg-zinc-900 p-6 rounded-xl border border-stone-200 dark:border-zinc-800">
+          <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
+            <div>
+              <h2 className="text-xl font-bold flex items-center gap-2">
+                <RefreshCw className={`w-5 h-5 text-blue-500 ${isPolling ? 'animate-spin' : ''}`} />
+                Real-time Health Monitor
+              </h2>
+              <p className="text-stone-500 dark:text-stone-400 text-sm mt-1">
+                Monitoring {totalKeys} API keys. Round-Robin Queue is currently pointing to index: <span className="font-mono bg-stone-200 dark:bg-zinc-800 px-2 py-0.5 rounded">{currentIndex}</span>
+              </p>
+            </div>
+            
+            <div className="flex flex-wrap items-center gap-3">
+              {error && <span className="text-red-500 text-sm w-full text-right block">{error}</span>}
+              <button 
+                onClick={() => setIsPolling(!isPolling)}
+                className={`btn-3d px-4 py-2 rounded-lg text-sm font-bold ${isPolling ? 'bg-red-500 hover:bg-red-600 text-white' : 'bg-green-500 hover:bg-green-600 text-white'}`}
+              >
+                {isPolling ? 'Stop Polling' : 'Start Polling'}
+              </button>
+              <button 
+                onClick={fetchKeysStatus}
+                className="btn-3d px-4 py-2 bg-stone-200 dark:bg-zinc-800 rounded-lg hover:bg-stone-300 dark:hover:bg-zinc-700 text-sm font-bold"
+              >
+                Refresh
+              </button>
+            </div>
+          </div>
+
+          <div className="flex bg-stone-200/50 dark:bg-zinc-800/50 p-1 rounded-lg mt-6 w-max self-end sm:self-auto">
             <button
               onClick={() => setActiveTab('monitor')}
-              className={`px-4 py-1.5 rounded-md text-sm font-medium transition-colors ${activeTab === 'monitor' ? 'bg-white dark:bg-zinc-700 shadow-sm text-stone-900 dark:text-stone-100' : 'text-stone-500 dark:text-stone-400 hover:text-stone-700 dark:hover:text-stone-200'}`}
+              className={`px-6 py-2 rounded-md text-sm font-medium transition-colors ${activeTab === 'monitor' ? 'bg-white dark:bg-zinc-700 shadow-sm text-stone-900 dark:text-stone-100' : 'text-stone-500 dark:text-stone-400 hover:text-stone-700 dark:hover:text-stone-200'}`}
             >
-              Monitor
+              Monitor Grid
             </button>
             <button
               onClick={() => setActiveTab('logs')}
-              className={`px-4 py-1.5 rounded-md text-sm font-medium transition-colors ${activeTab === 'logs' ? 'bg-white dark:bg-zinc-700 shadow-sm text-stone-900 dark:text-stone-100' : 'text-stone-500 dark:text-stone-400 hover:text-stone-700 dark:hover:text-stone-200'}`}
+              className={`px-6 py-2 rounded-md text-sm font-medium transition-colors ${activeTab === 'logs' ? 'bg-white dark:bg-zinc-700 shadow-sm text-stone-900 dark:text-stone-100' : 'text-stone-500 dark:text-stone-400 hover:text-stone-700 dark:hover:text-stone-200'}`}
             >
               Rotation Logs
             </button>
           </div>
-          {error && <span className="text-red-500 text-sm">{error}</span>}
-          <button 
-            onClick={() => setIsPolling(!isPolling)}
-            className={`btn-3d px-4 py-2 rounded-lg ${isPolling ? 'bg-red-500 hover:bg-red-600 text-white' : 'bg-green-500 hover:bg-green-600 text-white'}`}
-          >
-            {isPolling ? 'Stop Polling' : 'Start Polling'}
-          </button>
-          <button 
-            onClick={fetchKeysStatus}
-            className="btn-3d px-4 py-2 bg-stone-200 dark:bg-zinc-800 rounded-lg hover:bg-stone-300 dark:hover:bg-zinc-700"
-          >
-            Force Refresh
-          </button>
         </div>
       </div>
 

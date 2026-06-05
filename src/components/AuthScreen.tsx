@@ -73,9 +73,14 @@ export default function AuthScreen() {
           const correctAdminKey = import.meta.env.VITE_ADMIN_KEY || "seneca";
           if (adminKey && adminKey === correctAdminKey) {
               assignedRole = "teacher";
+              sessionStorage.setItem('adminToken', 'true');
               await dbService.updateUserProfile(userCredential.user.uid, { role: "teacher" });
-          } else if (!profile) {
-              await dbService.updateUserProfile(userCredential.user.uid, { role: "student" });
+          } else {
+              assignedRole = "student";
+              sessionStorage.removeItem('adminToken');
+              if (!profile || profile.role === 'teacher') {
+                  await dbService.updateUserProfile(userCredential.user.uid, { role: "student" });
+              }
           }
 
           const { store } = await import('../lib/store');
@@ -149,6 +154,19 @@ export default function AuthScreen() {
       }
 
       let assignedRole = profile.role || "student";
+      const correctAdminKey = import.meta.env.VITE_ADMIN_KEY || "seneca";
+      if (adminKey && adminKey === correctAdminKey) {
+          assignedRole = "teacher";
+          sessionStorage.setItem('adminToken', 'true');
+          await dbService.updateUserProfile(userCredential.user.uid, { role: "teacher" });
+      } else {
+          assignedRole = "student";
+          sessionStorage.removeItem('adminToken');
+          if (profile.role === 'teacher') {
+              await dbService.updateUserProfile(userCredential.user.uid, { role: "student" });
+          }
+      }
+      
       const { store } = await import('../lib/store');
       const currentUser = store.getCurrentUser();
       if (currentUser) {
@@ -178,6 +196,9 @@ export default function AuthScreen() {
       if (adminKey && adminKey === correctAdminKey) {
         assignedRole = "teacher";
         displayName = "Guest Teacher";
+        sessionStorage.setItem('adminToken', 'true');
+      } else {
+        sessionStorage.removeItem('adminToken');
       }
 
       const { store } = await import('../lib/store');

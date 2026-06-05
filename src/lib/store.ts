@@ -225,7 +225,14 @@ export const store = {
         // Lấy profile từ Firestore để đồng bộ role, points, streak, lastActiveDate, streakFreeze
         const profile = await dbService.getUserProfile(firebaseUser.uid);
         if (profile) {
-            if (profile.role) u.role = profile.role;
+            let sessionRole = profile.role || "student";
+            if (sessionRole === "teacher" && sessionStorage.getItem('adminToken') !== 'true') {
+                sessionRole = "student";
+            }
+            if (sessionStorage.getItem('adminToken') === 'true') {
+                sessionRole = "teacher";
+            }
+            if (sessionRole) u.role = sessionRole as any;
             if (typeof profile.points === 'number') u.points = profile.points;
             if (typeof profile.streak === 'number') u.streak = profile.streak;
             if (profile.lastActiveDate) u.lastActiveDate = profile.lastActiveDate;
