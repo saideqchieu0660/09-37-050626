@@ -291,14 +291,6 @@ export default function AdminKeysDashboard() {
   const [error, setError] = useState("");
   const [isLoading, setIsLoading] = useState(false);
 
-  // Auto-fill from env for easy local testing, but still require button click
-  // In a real app, you wouldn't expose VITE_ADMIN_KEY, but it's required here by prompt constraints.
-  useEffect(() => {
-    if (import.meta.env.VITE_ADMIN_KEY) {
-      setAdminKey(import.meta.env.VITE_ADMIN_KEY);
-    }
-  }, []);
-
   const handleLogin = async (e: React.FormEvent) => {
     e.preventDefault();
     setIsLoading(true);
