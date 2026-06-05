@@ -14,6 +14,7 @@ import TeacherDashboard from "./pages/TeacherDashboard";
 import StudyRoom from "./pages/StudyRoom";
 import CoStudyRoom from "./pages/CoStudyRoom";
 import SetupProfileScreen from "./pages/SetupProfileScreen";
+import AdminKeysDashboard from "./pages/AdminKeysDashboard";
 import Agent3Widget from "./components/Agent3Widget";
 import { GlobalErrorToast } from "./components/GlobalErrorToast";
 import { auth } from "./lib/firebase";
@@ -178,6 +179,7 @@ export default function App() {
             <Route path="/study/:deckId" element={<PageWrapper><StudyRoom /></PageWrapper>} />
             <Route path="/co-study" element={<PageWrapper><CoStudyRoom /></PageWrapper>} />
             <Route path="/setup-profile" element={<PageWrapper><SetupProfileScreen /></PageWrapper>} />
+            <Route path="/admin/keys" element={<PageWrapper><AdminKeysDashboard /></PageWrapper>} />
           </Routes>
         </AnimatePresence>
       </Layout>

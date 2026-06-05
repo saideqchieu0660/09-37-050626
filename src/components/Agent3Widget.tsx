@@ -94,7 +94,7 @@ export default function Agent3Widget() {
             "x-user-id": user?.id || "",
             "x-user-role": user?.role || ""
           },
-          body: JSON.stringify({ message: currentInput, sessionId, mode: "chat" })
+          body: JSON.stringify({ message: currentInput, history: messages, context, sessionId, mode: "chat" })
         });
 
         if (!res.ok) {

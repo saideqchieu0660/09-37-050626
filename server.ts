@@ -54,16 +54,52 @@ if (GEMINI_KEYS.length === 0 && process.env.GEMINI_API_KEY) {
     GEMINI_KEYS.push(process.env.GEMINI_API_KEY);
 }
 
+interface KeyState {
+  index: number;
+  key: string;
+  maskedKey: string;
+  status: "active" | "rate_limited" | "failed";
+  errorCount: number;
+  usageCount: number;
+  lastUsed: Date | null;
+}
+
+const geminiKeyStates: KeyState[] = GEMINI_KEYS.map((key, i) => ({
+  index: i + 1,
+  key,
+  maskedKey: `***${key.slice(-4)}`,
+  status: "active",
+  errorCount: 0,
+  usageCount: 0,
+  lastUsed: null
+}));
+
 let currentKeyIndex = 0;
 
-function getGeminiClient() {
-  if (GEMINI_KEYS.length === 0) {
+function getGeminiClient(): { ai: any, state: KeyState } {
+  if (geminiKeyStates.length === 0) {
     throw new Error("No Gemini API keys configured.");
   }
-  const apiKey = GEMINI_KEYS[currentKeyIndex];
-  currentKeyIndex = (currentKeyIndex + 1) % GEMINI_KEYS.length;
-  // Initialize AI client
-  return new GoogleGenAI({ apiKey });
+  
+  // Basic rotation
+  const state = geminiKeyStates[currentKeyIndex];
+  state.usageCount++;
+  state.lastUsed = new Date();
+  
+  const ai = new GoogleGenAI({ apiKey: state.key });
+  currentKeyIndex = (currentKeyIndex + 1) % geminiKeyStates.length;
+  
+  return { ai, state };
+}
+
+function handleGeminiError(state: KeyState, err: any) {
+  state.errorCount++;
+  const msg = err?.message || err?.toString() || "";
+  if (err?.status === 429 || msg.includes("429") || msg.includes("quota")) {
+    state.status = "rate_limited";
+  } else {
+    state.status = "failed";
+  }
 }
 
 function delay(ms: number) {
@@ -165,9 +201,11 @@ app.use(express.json({ limit: "50mb" }));
 
   // Agent 2: Dynamic Router Agent (Deep Extract)
   app.post("/api/agent2/explain", aiCooldownMiddleware, async (req, res, next) => {
+    let aiState: KeyState | null = null;
     try {
       const { term, definition, subject } = req.body;
-      const ai = getGeminiClient();
+      const { ai, state } = getGeminiClient();
+      aiState = state;
       
       let prompt = "";
       if (subject === "english") {
@@ -198,6 +236,7 @@ Bọc công thức Toán/Lý/Hóa bằng LaTeX (dấu $ hoặc $$). Chỉ trả 
       
       res.json({ result: response.text });
     } catch (error) {
+      if (aiState) handleGeminiError(aiState, error);
       console.error("Agent 2 Error:", error);
       next(error);
     }
@@ -205,9 +244,11 @@ Bọc công thức Toán/Lý/Hóa bằng LaTeX (dấu $ hoặc $$). Chỉ trả 
 
   // Mock Exam Generator
   app.post("/api/exam/generate", aiCooldownMiddleware, async (req, res, next) => {
+    let aiState: KeyState | null = null;
     try {
       const { decks, examType, count } = req.body;
-      const ai = getGeminiClient();
+      const { ai, state } = getGeminiClient();
+      aiState = state;
 
       const contextData = JSON.stringify(decks.map((d: any) => ({
         deckId: d.id,
@@ -244,6 +285,7 @@ BẮT BUỘC ĐỊNH DẠNG: Chỉ trả về ĐÚNG MỘT MẢNG JSON duy nhấ
 
       res.json({ result: response.text });
     } catch (error) {
+      if (aiState) handleGeminiError(aiState, error);
       console.error("Exam Generation Error:", error);
       next(error);
     }
@@ -265,11 +307,15 @@ BẮT BUỘC ĐỊNH DẠNG: Chỉ trả về ĐÚNG MỘT MẢNG JSON duy nhấ
       res.setHeader('Transfer-Encoding', 'chunked');
 
       res.write(JSON.stringify({ status: "Đang đọc nội dung gốc từ file..." }) + "\n");
-
-      let ai = getGeminiClient();
+      
+      let aiState: KeyState | null = null;
+      let aiClient: any = null;
       let rawText = "";
-
+      
       try {
+         const { ai, state } = getGeminiClient();
+         aiClient = ai;
+         aiState = state;
          const extractRes = await ai.models.generateContent({
              model: "gemini-2.5-flash",
              contents: [
@@ -279,6 +325,7 @@ BẮT BUỘC ĐỊNH DẠNG: Chỉ trả về ĐÚNG MỘT MẢNG JSON duy nhấ
          });
          rawText = extractRes.text || "";
       } catch (err: any) {
+         if (aiState) handleGeminiError(aiState, err);
          throw new Error("Lỗi khi đọc text từ file: " + err.message);
       }
 
@@ -301,7 +348,9 @@ BẮT BUỘC ĐỊNH DẠNG: Chỉ trả về ĐÚNG MỘT MẢNG JSON duy nhấ
             await delay(3000);
          }
 
-         ai = getGeminiClient(); // Round-robin rotate key
+         const keyData = getGeminiClient(); // Round-robin rotate key
+         aiClient = keyData.ai;
+         aiState = keyData.state;
 
          res.write(JSON.stringify({ status: `Đang gửi Chunk ${i+1}/${chunks.length} cho AI bóc tách...` }) + "\n");
 
@@ -314,7 +363,7 @@ TEXT CHUNK:
 ${chunks[i]}`;
 
          try {
-            const chunkRes = await ai.models.generateContent({
+            const chunkRes = await aiClient.models.generateContent({
                model: "gemini-2.5-flash",
                contents: [{ text: prompt }],
                config: {
@@ -335,6 +384,7 @@ ${chunks[i]}`;
                }
             }
          } catch (chunkErr: any) {
+            if (aiState) handleGeminiError(aiState, chunkErr);
             console.error(`Lỗi Chunk ${i}:`, chunkErr);
             res.write(JSON.stringify({ status: `Warning: Bỏ qua Chunk ${i+1} do lỗi: ${chunkErr.message}` }) + "\n");
          }
@@ -356,11 +406,13 @@ ${chunks[i]}`;
 
   // AI Quick Lesson Plan Generator (Tạo Giáo Án Nhanh)
   app.post("/api/agent/lesson-plan", aiCooldownMiddleware, async (req, res, next) => {
+    let aiState: KeyState | null = null;
     try {
       const { topic } = req.body;
       if (!topic) return res.status(400).json({ error: "No topic provided." });
       
-      const ai = getGeminiClient();
+      const { ai, state } = getGeminiClient();
+      aiState = state;
       let prompt = `Bạn là một chuyên gia thiết kế chương trình giảng dạy (Instructional Designer).
 Hãy tạo một giáo án học tập tối ưu cho chủ đề: "${topic}".
 Giáo án cần đảm bảo đủ kiến thức sâu sắc, logic và dễ hiểu.
@@ -390,6 +442,7 @@ KHÔNG sử dụng Markdown code block. TRẢ VỀ ĐÚNG MỘT OBJECT JSON DUY 
       
       res.json({ result: response.text });
     } catch (error: any) {
+      if (aiState) handleGeminiError(aiState, error);
       console.error("Lesson Plan Error:", error);
       next(error);
     }
@@ -397,9 +450,11 @@ KHÔNG sử dụng Markdown code block. TRẢ VỀ ĐÚNG MỘT OBJECT JSON DUY 
 
   // Agent 3: Socratic & Context-Aware Assistant
   app.post("/api/agent3/chat", aiCooldownMiddleware, async (req, res, next) => {
+    let aiState: KeyState | null = null;
     try {
-      const { message, context, mode, mcqData, difficulty, sessionId } = req.body;
-      const ai = getGeminiClient();
+      const { message, history, context, mode, mcqData, difficulty, sessionId } = req.body;
+      const { ai, state } = getGeminiClient();
+      aiState = state;
       
       let systemPrompt = `Mày là Agent 3 - 'Socrates AI Coach', gia sư học tập chủ động. QUY TẮC BẮT BUỘC CỐT LÕI:
 1. TRẢ LỜI NGẮN GỌN (Dưới 100 chữ). ĐI THẲNG VÀO NỘI DUNG, TUYỆT ĐỐI BỎ QUA MỌI LỜI CHÀO HỎI (VD: Không được nói "Chào em", "Chào bạn", "Tôi là...").
@@ -428,25 +483,13 @@ KHÔNG sử dụng Markdown code block. TRẢ VỀ ĐÚNG MỘT OBJECT JSON DUY 
       
       const fullPrompt = `Ngữ cảnh ẩn (Hidden Context): ${context}\n\nHọc sinh: ${message}`;
 
+      // Convert client history format to Gemini format
       let previousHistory: any[] = [];
-      let dbRef: admin.firestore.DocumentReference | null = null;
-      
-      if (mode === "chat" && sessionId && admin.apps.length > 0) {
-        try {
-          const db = admin.firestore();
-          // Use 'chat_sessions' in Firestore
-          dbRef = db.collection("chat_sessions").doc(sessionId);
-          const doc = await dbRef.get();
-          if (doc.exists) {
-            const data = doc.data();
-            if (data && data.messages && Array.isArray(data.messages)) {
-              previousHistory = data.messages;
-            }
-          }
-        } catch(e) {
-          console.error("Firestore retrieval error:", e);
-          previousHistory = []; 
-        }
+      if (history && Array.isArray(history)) {
+        previousHistory = history.map(msg => ({
+          role: msg.role === "ai" ? "model" : "user",
+          parts: [{ text: msg.text }]
+        }));
       }
 
       const contents = [
@@ -463,25 +506,41 @@ KHÔNG sử dụng Markdown code block. TRẢ VỀ ĐÚNG MỘT OBJECT JSON DUY 
 
       const responseText = response.text || "";
 
-      if (mode === "chat" && dbRef) {
-        try {
-          await dbRef.set({
-            messages: admin.firestore.FieldValue.arrayUnion(
-              { role: "user", parts: [{ text: fullPrompt }] },
-              { role: "model", parts: [{ text: responseText }] }
-            ),
-            updatedAt: admin.firestore.FieldValue.serverTimestamp()
-          }, { merge: true });
-        } catch(e) {
-          console.error("Firestore arrayUnion error:", e);
-        }
-      }
-      
       res.json({ result: responseText });
     } catch (error: any) {
+      if (aiState) handleGeminiError(aiState, error);
       console.error("Agent 3 Error:", error);
       next(error);
     }
+  });
+
+  // Admin Keys Status Endpoint
+  app.get("/api/admin/keys-status", (req, res) => {
+    const adminKey = req.headers["x-admin-key"];
+    if (adminKey !== process.env.VITE_ADMIN_KEY) {
+      return res.status(403).json({ error: "Thao tác không hợp lệ. Sai admin key." });
+    }
+    
+    // reset rate_limited to active if passed 60s
+    const now = Date.now();
+    geminiKeyStates.forEach(state => {
+       if (state.status === "rate_limited" && state.lastUsed && (now - state.lastUsed.getTime() > 60000)) {
+           state.status = "active";
+       }
+    });
+
+    res.json({
+       totalKeys: geminiKeyStates.length,
+       currentIndex: currentKeyIndex,
+       keys: geminiKeyStates.map(s => ({
+          index: s.index,
+          maskedKey: s.maskedKey,
+          status: s.status,
+          usageCount: s.usageCount,
+          errorCount: s.errorCount,
+          lastUsed: s.lastUsed
+       }))
+    });
   });
 
   app.post("/api/daily-quest", express.json(), async (req, res, next) => {
