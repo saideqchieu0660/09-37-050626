@@ -81,21 +81,46 @@ function getGeminiClient(): { ai: any, state: KeyState } {
     throw new Error("No Gemini API keys configured.");
   }
   
-  // Basic rotation
-  const state = geminiKeyStates[currentKeyIndex];
-  state.usageCount++;
-  state.lastUsed = new Date();
+  // 1. Recover keys that have been rate limited for over 60 seconds
+  const now = Date.now();
+  geminiKeyStates.forEach(s => {
+    if (s.status === "rate_limited" && s.lastUsed && (now - s.lastUsed.getTime() > 60000)) {
+       s.status = "active";
+    }
+  });
+
+  // 2. Find the next active key
+  let attempts = 0;
+  let selectedState: KeyState | null = null;
   
-  const ai = new GoogleGenAI({ apiKey: state.key });
+  while (attempts < geminiKeyStates.length) {
+    const s = geminiKeyStates[currentKeyIndex];
+    if (s.status !== "rate_limited") {
+       selectedState = s;
+       break;
+    }
+    currentKeyIndex = (currentKeyIndex + 1) % geminiKeyStates.length;
+    attempts++;
+  }
+
+  // 3. Fallback: If all keys are rate limited, pick the one with the lowest usage or the one we are at
+  if (!selectedState) {
+    selectedState = geminiKeyStates[currentKeyIndex];
+  }
+  
+  selectedState.usageCount++;
+  selectedState.lastUsed = new Date();
+  
+  const ai = new GoogleGenAI({ apiKey: selectedState.key });
   currentKeyIndex = (currentKeyIndex + 1) % geminiKeyStates.length;
   
-  return { ai, state };
+  return { ai, state: selectedState };
 }
 
 function handleGeminiError(state: KeyState, err: any) {
   state.errorCount++;
   const msg = err?.message || err?.toString() || "";
-  if (err?.status === 429 || msg.includes("429") || msg.includes("quota")) {
+  if (err?.status === 429 || msg.includes("429") || msg.includes("quota") || msg.toLowerCase().includes("too many requests")) {
     state.status = "rate_limited";
   } else {
     state.status = "failed";

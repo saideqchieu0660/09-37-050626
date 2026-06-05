@@ -1,5 +1,5 @@
 import React, { useState, useRef } from "react";
-import { FileUp, FileText, Check, AlertCircle, Loader2, ChevronDown, Plus } from "lucide-react";
+import { FileUp, FileText, Check, AlertCircle, Loader2, ChevronDown, Plus, Trash2 } from "lucide-react";
 import { cn } from "../lib/utils";
 import ErrorNotification from "./ErrorNotification";
 import { store, Deck } from "../lib/store";
@@ -19,6 +19,8 @@ export default function DocumentConverter() {
   const [isCatDropdownOpen, setIsCatDropdownOpen] = useState(false);
   const catDropdownRef = useRef<HTMLDivElement>(null);
   const catInputRef = useRef<HTMLInputElement>(null);
+
+  const [extractedCards, setExtractedCards] = useState<{id: string, front: string, back: string}[] | null>(null);
 
   const existingCategories = React.useMemo(() => {
     const allDecks = store.getDecks();
@@ -182,49 +184,26 @@ export default function DocumentConverter() {
          throw new Error("Tài liệu không đủ cấu trúc để nhận diện Học phần. Vui lòng kiểm tra lại file.");
       }
 
-      // 3. Save to Store/Firestore
-      setProgress("Đang lưu hàng loạt (BatchWrite) vào cơ sở dữ liệu...");
+      // 3. Instead of saving immediately, allow user to review
+      setProgress("Đang chuẩn bị thẻ để xem xét...");
+      
       const { v4: uuidv4 } = await import("uuid");
-      const deckId = `deck_${uuidv4()}`;
-      
-      const newDeckObj: Deck = {
-        id: deckId,
-        title: deckTitle.trim() || `Tài liệu: ${file.name.substring(0, 30)}`,
-        subject: deckSubject.trim() || "Tự chọn",
-        cards: validCards.map((c) => ({
-          id: `card_${uuidv4()}`,
-          front: c.front,
-          back: c.back,
-          subject: deckSubject.trim() || "Tự chọn",
-          mastery: 0,
-          nextReview: Date.now(),
-          isHard: false
-        }))
-      };
+      const mappedCards = validCards.map((c) => ({
+        id: `card_${uuidv4()}`,
+        front: c.front,
+        back: c.back
+      }));
 
-      try {
-         const { db } = await import("../lib/firebase");
-         const { doc, writeBatch } = await import("firebase/firestore");
-         const batch = writeBatch(db);
-         
-         const deckRef = doc(db, "sets", deckId);
-         batch.set(deckRef, {
-             id: newDeckObj.id,
-             title: newDeckObj.title,
-             subject: newDeckObj.subject,
-             cards: newDeckObj.cards
-         });
-         
-         await batch.commit();
-         store.setTempDeck(newDeckObj); // Update UI store locallly
-      } catch (fbErr: any) {
-         throw new Error("Lỗi lưu trữ Firestore BatchWrite: " + fbErr.message);
-      }
+      setExtractedCards(mappedCards);
+      setSuccessCount(mappedCards.length);
       
-      setSuccessCount(validCards.length);
+      // Cleanup file state after extraction is successful
       setFile(null);
-      setDeckTitle("");
-      setDeckSubject("");
+      if (fileInputRef.current) {
+        fileInputRef.current.value = "";
+      }
+      setProgress("");
+      setIsProcessing(false);
       
     } catch (err: any) {
       console.error(err);
@@ -259,6 +238,77 @@ export default function DocumentConverter() {
          fileInputRef.current.value = "";
       }
     }
+  };
+
+  const handleSaveDeck = async () => {
+    if (!extractedCards || extractedCards.length === 0) return;
+    
+    setIsProcessing(true);
+    setProgress("Đang lưu hàng loạt (BatchWrite) vào cơ sở dữ liệu...");
+    setError(null);
+    
+    try {
+      const { v4: uuidv4 } = await import("uuid");
+      const deckId = `deck_${uuidv4()}`;
+      
+      const titleToUse = deckTitle.trim() || `Tài liệu vừa tải lên`;
+      const subjectToUse = deckSubject.trim() || "Tự chọn";
+
+      const newDeckObj: Deck = {
+        id: deckId,
+        title: titleToUse,
+        subject: subjectToUse,
+        cards: extractedCards.map((c) => ({
+          id: c.id,
+          front: c.front,
+          back: c.back,
+          subject: subjectToUse,
+          mastery: 0,
+          nextReview: Date.now(),
+          isHard: false
+        }))
+      };
+
+      const { db } = await import("../lib/firebase");
+      const { doc, writeBatch } = await import("firebase/firestore");
+      const batch = writeBatch(db);
+      
+      const deckRef = doc(db, "sets", deckId);
+      batch.set(deckRef, {
+          id: newDeckObj.id,
+          title: newDeckObj.title,
+          subject: newDeckObj.subject,
+          cards: newDeckObj.cards
+      });
+      
+      await batch.commit();
+      store.setTempDeck(newDeckObj); // Update UI store locally
+      
+      setSuccessCount(extractedCards.length);
+      setExtractedCards(null);
+      setDeckTitle("");
+      setDeckSubject("");
+      setProgress("Lưu thành công!");
+      
+    } catch (err: any) {
+      console.error(err);
+      setError("Lỗi lưu trữ Firestore BatchWrite: " + err.message);
+    } finally {
+      setIsProcessing(false);
+      setTimeout(() => setProgress(""), 3000);
+    }
+  };
+
+  const handleCardChange = (id: string, field: 'front' | 'back', value: string) => {
+    if (!extractedCards) return;
+    setExtractedCards(extractedCards.map(c => 
+      c.id === id ? { ...c, [field]: value } : c
+    ));
+  };
+
+  const handleRemoveCard = (id: string) => {
+    if (!extractedCards) return;
+    setExtractedCards(extractedCards.filter(c => c.id !== id));
   };
 
   return (
@@ -439,10 +489,56 @@ export default function DocumentConverter() {
             </button>
             
             {isProcessing && progress && (
-               <p className="text-xs text-blue-600 dark:text-blue-400 text-center animate-pulse">{progress}</p>
+               <p className="text-xs text-blue-600 dark:text-blue-400 text-center animate-pulse mt-2">{progress}</p>
             )}
+            <p className="text-xs text-red-500 dark:text-red-400 italic text-center mt-3">
+               AI có thể mắc sai lầm, hãy cẩn trọng! Khuyến nghị chia nhỏ files nhằm tối ưu hoá chất lượng đầu ra của hệ thống. VD: chia nhỏ theo bài / Unit / dưới 200 vocab là tối ưu nhất
+            </p>
          </div>
       </div>
+
+      {extractedCards && extractedCards.length > 0 && (
+        <div className="mt-8 pt-8 border-t border-stone-200 dark:border-zinc-800">
+          <div className="flex items-center justify-between mb-4">
+            <h3 className="text-lg font-bold">Review {extractedCards.length} thẻ mới tạo</h3>
+            <button 
+              onClick={handleSaveDeck}
+              disabled={isProcessing}
+              className="btn-3d-primary px-6 py-2 disabled:opacity-50"
+            >
+              {isProcessing ? "Đang lưu..." : "Lưu Học Phần"}
+            </button>
+          </div>
+          
+          <div className="space-y-4 max-h-[500px] overflow-y-auto pr-2 custom-scrollbar">
+            {extractedCards.map((c, i) => (
+              <div key={c.id} className="card-3d p-4 rounded-xl border flex gap-4">
+                <div className="flex-shrink-0 text-stone-400 font-bold w-6">{i + 1}</div>
+                <div className="flex-grow grid md:grid-cols-2 gap-4">
+                  <textarea
+                    value={c.front}
+                    onChange={(e) => handleCardChange(c.id, 'front', e.target.value)}
+                    className="input-3d p-3 min-h-[80px] w-full text-sm"
+                    placeholder="Mặt trước..."
+                  />
+                  <textarea
+                    value={c.back}
+                    onChange={(e) => handleCardChange(c.id, 'back', e.target.value)}
+                    className="input-3d p-3 min-h-[80px] w-full text-sm"
+                    placeholder="Mặt sau..."
+                  />
+                </div>
+                <button 
+                  onClick={() => handleRemoveCard(c.id)}
+                  className="flex-shrink-0 self-start p-2 text-red-500 hover:bg-red-50 dark:hover:bg-red-950/30 rounded-lg transition"
+                >
+                  <Trash2 className="w-5 h-5" />
+                </button>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
     </section>
   );
 }

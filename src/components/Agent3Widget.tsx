@@ -74,7 +74,8 @@ export default function Agent3Widget() {
         if (!res.ok) {
           const errData = await res.json();
           if (res.status === 429) {
-            setMessages(prev => [...prev, { role: "ai", text: `⏳ ${errData.error || "Bạn đang gọi AI quá nhanh. Hãy chờ hoặc nạp năng lượng!"}` }]);
+            const errMsg = typeof errData.error === 'string' ? errData.error : "Bạn đang gọi AI quá nhanh. Hãy chờ hoặc nạp năng lượng!";
+            setMessages(prev => [...prev, { role: "ai", text: `⏳ ${errMsg}` }]);
             setIsLoading(false);
             return;
           }
@@ -94,13 +95,20 @@ export default function Agent3Widget() {
             "x-user-id": user?.id || "",
             "x-user-role": user?.role || ""
           },
-          body: JSON.stringify({ message: currentInput, history: messages, context, sessionId, mode: "chat" })
+          body: JSON.stringify({ 
+            message: currentInput, 
+            history: messages.filter(m => !(m.role === "ai" && (m.text.includes("⏳") || m.text.includes("Tín hiệu bị nhiễu")))), 
+            context, 
+            sessionId, 
+            mode: "chat" 
+          })
         });
 
         if (!res.ok) {
           const errData = await res.json();
           if (res.status === 429) {
-            setMessages(prev => [...prev, { role: "ai", text: `⏳ ${errData.error || "Bạn đang gọi AI quá nhanh. Hãy chờ hoặc nạp năng lượng!"}` }]);
+            const errMsg = typeof errData.error === 'string' ? errData.error : "Bạn đang gọi AI quá nhanh. Hãy chờ hoặc nạp năng lượng!";
+            setMessages(prev => [...prev, { role: "ai", text: `⏳ ${errMsg}` }]);
             setIsLoading(false);
             return;
           }
